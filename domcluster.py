@@ -5,22 +5,41 @@ import json
 import numpy as np
 import pylab
 
-pages = []
+CLUSTER_CUTOFF = 0.2
+
+def singleCluster(pages, clustered):
+  clusterPage = None
+  clusterPageUri = ""
+  for uri,page in pages.iteritems():
+    if uri not in clustered:
+      clusterPage = page
+      clusterPageUri = uri
+      break
+  if clusterPage == None: return None
+  curCluster = set([clusterPageUri])
+  for uri,opage in pages.iteritems():
+    if dommerge.nodeDist(clusterPage, opage) <= CLUSTER_CUTOFF:
+      curCluster.add(uri)
+      clustered.add(uri)
+  return curCluster
+
+
+
+pages = {}
 distance = {}
 
 with open('lel.txt') as rf:
-  pages = [dommerge.Node(json.loads(line)["dom"]) for line in rf]
+  for line in rf:
+    obj = json.loads(line)
+    pages[obj["url"]] = dommerge.Node(obj["dom"])
 
-for i,page1 in enumerate(pages):
-  for j,page2 in enumerate(pages):
-    if j <= i: continue
-    distance[(i,j)] = dommerge.nodeDist(page1,page2)
+clustered = set()
+clusters = []
 
+while len(clustered) < len(pages):
+  clusters.append(singleCluster(pages, clustered))
 
-members = list(distance.iteritems())
-print members
-members.sort(key=lambda x: x[1])
-print members
-print len(members)
+for cluster in clusters:
+  print cluster
 
 
