@@ -1,5 +1,6 @@
-import json
 import dommerge
+
+import json
 
 import numpy as np
 import pylab
@@ -20,5 +21,6 @@ members = list(distance.iteritems())
 print members
 members.sort(key=lambda x: x[1])
 print members
+print len(members)
 
 

@@ -28,6 +28,8 @@ class Node(object):
 
   children = None
 
+  editWeight = 0
+
   def __init__(self, nodeDict = None):
     # filler nodes are those that differ between two merged nodes
     self.is_filler = False
@@ -51,6 +53,19 @@ class Node(object):
       if self.is_filler == False:
         return self.text
     return None
+
+  # the total "edit distance" penalty for inserting/deleting this node and all its children
+  def getEditWeight(self):
+    if self.editWeight == 0:
+      self.editWeight += (LEVEL_DIST_MULTIPLIER *
+          sum(c.getEditWeight() for c in self.children)) if self.children else 0
+      self.editWeight +=  DIFF_TEXT_DIST if self.nodeName == "#text" else DIFF_NODE_DIST
+    return self.editWeight
+
+  def makeCopy(self):
+    retCopy = copy.copy(self)
+    retCopy.editWeight = 0
+    return retCopy
 
   def toDict(self):
     return {
@@ -103,7 +118,8 @@ def nodeMerge(node1, node2):
   return mergeNodes(node1, node2)[0]
 
 def nodeDist(node1, node2):
-  return mergeNodes(node1, node2)[1]
+  return mergeNodes(node1, node2)[1] / (node1.getEditWeight() +
+      node2.getEditWeight())
 
 # returns (merged_node, edit_dist) pair
 def mergeNodes(node1, node2):
@@ -111,7 +127,7 @@ def mergeNodes(node1, node2):
   if node1.nodeName != node2.nodeName:
     return (Node({
       "nodeName": "#filler"
-      }), DIFF_NODE_DIST)
+      }), node1.getEditWeight() + node2.getEditWeight())
   # guaranteed that node1.nodeName == node2.nodeName from this point on
 
   # if both fillers, just return a filler of the appropriate type
@@ -126,13 +142,13 @@ def mergeNodes(node1, node2):
   if node1.nodeName == "#text":
     # generate a filler text node if text differs
     if node1.getText() != node2.getText():
-      return (TextFillerNode(), DIFF_TEXT_DIST)
+      return (TextFillerNode(), 2*DIFF_TEXT_DIST)
     # return the (shallow-copied) same text node if text doesn't differ
     else:
-      return (copy.copy(node1), 0)
+      return (node1.makeCopy(), 0)
 
   # otherwise we will keep this node but merge its children
-  retNode = copy.copy(node1)
+  retNode = node1.makeCopy()
   retNode.children = None
   retDist = 0
 
@@ -147,8 +163,8 @@ def mergeNodes(node1, node2):
 
     retNode.children = mergedNodes
     retDist += sum(mergedDists)
-
-  retDist += abs(len(n1c) - len(n2c)) * DIFF_NODE_DIST
+    retDist += (sum(c.getEditWeight() for c in n1c[len(mergedNodes):])
+        + sum(c.getEditWeight() for c in n1c[len(mergedNodes):]))
   retDist *= LEVEL_DIST_MULTIPLIER
 
   return (retNode, retDist)
