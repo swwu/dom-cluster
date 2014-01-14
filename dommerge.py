@@ -125,9 +125,7 @@ def nodeDist(node1, node2):
 def mergeNodes(node1, node2):
   # if nodeNames differ, return structure-filler
   if node1.nodeName != node2.nodeName:
-    return (Node({
-      "nodeName": "#filler"
-      }), node1.getEditWeight() + node2.getEditWeight())
+    return (DomFillerNode(), node1.getEditWeight() + node2.getEditWeight())
   # guaranteed that node1.nodeName == node2.nodeName from this point on
 
   # if both fillers, just return a filler of the appropriate type
