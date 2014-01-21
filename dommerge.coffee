@@ -5,11 +5,13 @@ fs = require 'fs'
 global = window? or global
 
 # weight for structural node edit-distance
-DIFF_NODE_DIST = 100
+DIFF_NODE_DIST = 1000
 # weight for text-node content edit-distance
 DIFF_TEXT_DIST = 1
 # damping coefficient per level of the DOM tree
-LEVEL_DIST_MULTIPLIER = 1/2.7
+LEVEL_DIST_MULTIPLIER = 1/1.1
+# required (but non-semantic) formatting elements like tbody get a pass
+LEVEL_DIST_FORMATONLY_MULTIPLIER = 1
 
 
 # token used to concatenate memoize_tokens for memoization of n-arg fns
@@ -86,11 +88,17 @@ class Node
     else
       return null
 
+  getLevelMultiplier: ->
+    if @nodeName in ["tbody"]
+      return LEVEL_DIST_FORMATONLY_MULTIPLIER
+    else
+      return LEVEL_DIST_MULTIPLIER
+
   getEditWeight: ->
     if !@editWeight
       @editWeight = 0
       if @children
-        @editWeight = LEVEL_DIST_MULTIPLIER * sum(c.getEditWeight() for c in @children)
+        @editWeight = @getLevelMultiplier() * sum(c.getEditWeight() for c in @children)
       @editWeight += if @nodeName == "#text"
         DIFF_TEXT_DIST
       else
@@ -137,7 +145,7 @@ class DomFillerNode extends Node
 nodeDist = (node1, node2) ->
   mergeNodes(node1, node2).dist / (node1.getEditWeight() + node2.getEditWeight())
 
-nodeMerge = (node1, node2) -> mergeNodes(node1, node2).node
+nodeMerge = (node1, node2) -> mergeNodes(node1, node2).dom
 
 mergeNodes = (node1, node2) ->
   # if nodeNames differ, return structure-filler
@@ -177,6 +185,13 @@ mergeNodes = (node1, node2) ->
         dist: 0
       }
 
+  for attr in ["class", "id"]
+    if node1[attr] != node2[attr]
+      return {
+        dom: new DomFillerNode()
+        dist: node1.getEditWeight() + node2.getEditWeight()
+      }
+
   # otherwise we will keep this node but merge its children
   retNode = node1.makeCopy()
   retDist = 0
@@ -199,7 +214,7 @@ mergeNodes = (node1, node2) ->
     retDist += (sum(c.getEditWeight() for c in n1c[slicePoint..]) +
       sum(c.getEditWeight() for c in n2c[slicePoint..]))
 
-  retDist *= LEVEL_DIST_MULTIPLIER
+  retDist *= retNode.getLevelMultiplier()
 
   return {
     dom: retNode
@@ -255,6 +270,7 @@ module.exports = {
   Node: Node
   nodeMerge: nodeMerge
   nodeDist: nodeDist
+  mergeNodes: mergeNodes
 }
 
 
