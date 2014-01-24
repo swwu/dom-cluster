@@ -6,7 +6,6 @@ global = window? or global
 
 uuid = ->
   "#{(new Date()).getTime()}#{Math.random().toString(36).substring(2)}"
-
 # the maximum normalized edit distance allowed for nodeListEditDist to consider two nodes structurally identical
 EDIT_DIST_THRESHOLD = 0.3
 
@@ -17,7 +16,7 @@ NodeTypes = {
 }
 
 
-class Node
+class BaseNode
   ###
   # Sign can be any natural number, or one of ?+*
   #
@@ -39,22 +38,13 @@ class Node
   editWeight: null
 
   constructor: (nodeDict) ->
-
     # memoize_token is used to memoize node operations
     @uuid = uuid()
 
-    if not nodeDict then nodeDict = Object.create(null)
-
-    # things that describe the node itself
-    @nodeName = nodeDict.nodeName
-    @tagName = nodeDict.tagName
-    @attrs = nodeDict.attrs
-    @text = nodeDict.text
-    if nodeDict.children
-      @children = for node in nodeDict.children
-        new Node(node)
-    else
-      @children = []
+  # does this node have a constant sign, i.e. does it always appear a fixed
+  # number of times? constant signs are integers only
+  isConstantSign: ->
+    return !isNaN(@sign)
 
   # how deep the subtree rooted at this node is
   getTreeDepth: ->
@@ -69,12 +59,6 @@ class Node
     if @children
       for c in @children
         c.callPreOrder(fn)
-
-  getText: ->
-    if @nodeName == "#text" and !@is_filler
-      return @text
-    else
-      return null
 
   # returns a shallow copy
   makeCopy: ->
@@ -95,13 +79,54 @@ class Node
 
   toString: ->
     val = @nodeName
-    if @attrs.id
+    if @attrs?.id
       val += "##{@attrs.id}"
-    if @attrs.class
+    if @attrs?.class
       val += ".#{@attrs.class.split(" ").join(".")}"
+    if @children
+      val += "[#{@children.length}]"
+    val += "^{#{@sign}}"
     return val
 
-class ParenNode extends Node
+class Node extends BaseNode
+  constructor: (nodeDict) ->
+    super()
+
+    if not nodeDict then nodeDict = Object.create(null)
+
+    # things that describe the node itself
+    @nodeName = nodeDict.nodeName
+    @tagName = nodeDict.tagName
+    @attrs = nodeDict.attrs
+    @text = nodeDict.text
+    @sign = 1
+
+    if nodeDict.children
+      @children = for node in nodeDict.children
+        new Node(node)
+    else
+      @children = []
+
+
+class ParenNode extends BaseNode
+  constructor: (children, sign) ->
+    super()
+
+    @nodeName = "##paren"
+    @sign = sign
+
+    @tagName = null
+    @attrs = null
+    @text = null
+
+    @children = children
+
+  getTreeDepth: ->
+    if @children?.length > 0
+      return Math.max.apply(null, (c.getTreeDepth() for c in @children))
+    else
+      return 0
+
 
 ###
 # The node templatization algorithm.
@@ -116,41 +141,52 @@ templatizeNode = (node, k = 10) ->
   # unlikely to find results
   if node.getTreeDepth() >= 3
 
-    # find any repeating patterns in this node's children
-    # allgroups is [ [ [node,node...],[node,node...] ], ... ]
-    # each group is guaranteed to be contiguous, and groups are guaranteed not
-    # to overlap
-    allGroups = combComp(node.children, k)
+    # if it's not a paren node, then try to find repeating elements
+    if node.nodeName != "##paren"
+      # find any repeating patterns in this node's children
+      # allgroups is [ [ [node,node...],[node,node...] ], ... ]
+      # each group is guaranteed to be contiguous, and groups are guaranteed not
+      # to overlap
+      allGroups = combComp(node.children, k)
 
-    # find every node that's been added to a group
-    groupedChildren = Object.create(null)
-    for groups in allGroups
-      for group in groups
-        for curNode in group
-          groupedChildren[curNode.uuid] = curNode
+      prelen = node.children.length
+      preStr = node.children.toString()
 
-    newChildren = []
-    for c in node.children
-      # if it hasn't been grouped, just add it in its usual place
-      if c.uuid not of groupedChildren
-        newChildren.push(c)
-      else
-        # otherwise, check if a group starts with it. if it does, then add
-        # that entire group here
-        for groups in allGroups
-          if c == groups[0][0]
-            if groups[0].length == 1
-              # if it's a grouping of 1-sized groups then just add the first
-              # element with sign of +
-              c.sign = '+'
-              newChildren.push(c)
-            else
-              # if it's a grouping of non-1-sized groups then just add the
-              # first group as a paren group with sign of +
-              # TODO: actually implement paren nodes
-              newChildren.push(new ParenNode(groups[0],'+'))
+      # find every node that's been added to a group
+      groupedChildren = Object.create(null)
+      for group in allGroups
+        for region in group
+          for curNode in region
+            groupedChildren[curNode.uuid] = curNode
 
-    node.children = newChildren
+      newChildren = []
+      for c in node.children
+        # if it hasn't been grouped, just add it in its usual place
+        if c.uuid not of groupedChildren
+          newChildren.push(c)
+        else
+          # otherwise, check if a group starts with it. if it does, then add
+          # that entire group here
+          for group in allGroups
+            if c == group[0][0]
+              if group[0].length == 1
+                # if it's a grouping of 1-sized regions then just add the first
+                # element with sign = group.length
+                c.sign = group.length
+                newChildren.push(c)
+              else
+                # if it's a grouping of non-1-sized regions then just add the
+                # first region as a paren group with sign = group.length
+                newChildren.push(new ParenNode(group[0],group.length))
+
+      oldChildren = node.children
+      node.children = newChildren
+      postlen = node.children.length
+
+      if prelen != postlen
+        console.log "#{prelen} to #{postlen}"
+        console.log preStr
+        console.log node.children.toString()
     # then recurse
     for c in node.children
       templatizeNode(c, k)
@@ -225,7 +261,7 @@ combComp = (nodeList, k = 10) ->
     # allows smaller groups to take precedence over larger ones, so that e.g.
     # AAAA will properly be identified as A^4 rather than (AA)^2
     for group in sizedGroups
-      retGroups.filter((retGroup) ->
+      retGroups = retGroups.filter((retGroup) ->
         !hasGroupIntersect(retGroup, group)
       )
       retGroups.push(group)
@@ -281,8 +317,8 @@ fs.readFile('lel.txt', 'utf8', (err, data) ->
   entries = for pageText in data.split('\n').filter((x) -> x.length > 0)
     new Node(JSON.parse(pageText).dom)
 
-  console.log JSON.stringify(templatizeNode(entries[0]).toDict())
-  console.log JSON.stringify(templatizeNode(entries[1]).toDict())
-  console.log JSON.stringify(templatizeNode(entries[2]).toDict())
+  JSON.stringify(templatizeNode(entries[0]).toDict())
+  #console.log JSON.stringify(templatizeNode(entries[1]).toDict())
+  #console.log JSON.stringify(templatizeNode(entries[2]).toDict())
 )
 
