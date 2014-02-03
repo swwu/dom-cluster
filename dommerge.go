@@ -55,8 +55,140 @@ func FilterRegionGroups(s []*regionGroup, fn func(*regionGroup) bool) []*regionG
   return p
 }
 
+
+type AlignmentInstance struct {
+  a *Node
+  b *Node
+}
+
+type NodeAlignment struct {
+  score int
+  aligned []AlignmentInstance
+}
+
+// creates a "base" alignment (empty aligned array) with a given score
+func BaseNodeAlignment(score int) *NodeAlignment {
+  return &NodeAlignment {
+    score: score,
+  }
+}
+
+func (na *NodeAlignment) MakeCopy() *NodeAlignment {
+  tmp := make([]AlignmentInstance, len(na.aligned))
+  copy(tmp, na.aligned)
+  return &NodeAlignment {
+    score: na.score,
+    aligned: tmp,
+  }
+}
+
+// insertion
+func (na *NodeAlignment) InsOp(score int, newNode *Node) {
+  na.score += score
+  na.aligned = append(na.aligned, AlignmentInstance{
+    a: nil,
+    b: newNode,
+  })
+}
+
+// substitution
+func (na *NodeAlignment) SubOp(score int, firstNode *Node, secondNode *Node) {
+  na.score += score
+  na.aligned = append(na.aligned, AlignmentInstance{
+    a: firstNode,
+    b: secondNode,
+  })
+}
+
+// deletion
+func (na *NodeAlignment) DelOp(score int, delNode *Node) {
+  na.score += score
+  na.aligned = append(na.aligned, AlignmentInstance{
+    a: delNode,
+    b: nil,
+  })
+}
+
+func (na *NodeAlignment) PrintAlignment() {
+  for i:=0;i<len(aligned);i++ {
+    fmt.Printf("+")
+  }
+  fmt.Printf("\n")
+  // TODO: finish this
+  fmt.Printf("\n")
+  for i:=0;i<len(aligned);i++ {
+    fmt.Printf("-")
+  }
+}
+
+// align two forests
+// TODO: we can't use the matrix approach because ?+* prevents us from knowing
+// beforehand the dimensions of the matrix
+func NodeAlign(a,b []*Node) *NodeAlignment {
+  la := len(a)
+  lb := len(b)
+
+  d  := make([]*NodeAlignment, la + 1) // single array (current column of levenshtein matrix)
+
+  // initialize first column
+  d[0] = BaseNodeAlignment(0)
+  for i := 1; i <= la; i++ {
+    d[i] = d[i-1].MakeCopy()
+    d[i].InsOp(a[i-1].TreeWeight(), a[i-1])
+  }
+
+  // iteration of i corresponds to "moving" the column represented by d,
+  // where at the end of each loop d represents the ith column of the matrix.
+  // before the first iteration d represents the 0th column
+  for i := 1; i <= lb; i++ {
+    // the 0th element of each column is just the total "cost" of b so far
+    lastDiag := d[0] // keep track of the diagonal to substitute from
+    d[0] = d[0].MakeCopy()
+    d[0].InsOp(b[i-1].TreeWeight(), b[i-1])
+
+    // we now iterate over the column
+    for j := 1; j <= la; j++ {
+      lastVal := d[j] // this is the value of this row in the previous column
+
+      // we now calculate horizontal, vertical, and diagonal movement in the
+      // matrix. horizontal movement represents an addition, vertical
+      // represents a deletion, and diagonal represents a substitution
+
+      // TODO: properly adjust signs, make sure "missing" elements are
+      // properly inserted (a "deletion" still inserts the deleted element
+      // with sign '?')
+
+      // TODO: make +?* properly consume multiple input values
+
+      // horizontal movement (deletion)
+      newVal := d[j].MakeCopy()
+      newVal.DelOp(b[j].TreeWeight(), b[j-1])
+
+      // vertical movement (insertion)
+      vVal := d[j].MakeCopy()
+      vVal.InsOp(a[i].TreeWeight(), a[i-1])
+      if vVal.score < newVal.score {
+        newVal = vVal
+      }
+
+      // diagonal movement
+      var subCost := 0
+      if a[i-1].NodeName != b[j-1].NodeName {
+        subCost = a[i-1].TreeWeight() + b[j-1].TreeWeight()
+      }
+      dVal := d[j].MakeCopy()
+      dVal.SubOp(subCost, a[i-1], b[j-1])
+      if dval < newval {
+        newval = dval
+      }
+
+      lastDiag = lastVal // update the diagonal to be the element formerly to the left
+    }
+  }
+}
+
 // Levenshtein to compare tag arrays
-func LevenshteinDistance(a, b []string) int {
+func TagLevenshteinDistance(a, b []string) int {
   la := len(a)
   lb := len(b)
   d  := make([]int, la + 1)
@@ -89,6 +221,9 @@ func LevenshteinDistance(a, b []string) int {
   return d[la]
 }
 
+
+
+
 type Entry struct {
   Url string `json:"url"`
   Dom Node `json:"dom"`
@@ -108,6 +243,8 @@ type Node struct {
   Sign int `json:"sign"`
 
   treeDepth int
+  treeWeight int
+  isParen bool
 
 }
 
@@ -122,6 +259,7 @@ func NewParenNode(children []*Node, sign int) *Node {
     NodeName: "##paren",
     Children: children,
     Sign: sign,
+    isParen: true,
   }
 }
 
@@ -141,6 +279,37 @@ func (n *Node) TreeDepth() int {
     n.treeDepth = myDepth
   }
   return n.treeDepth
+}
+
+func (n *Node) TreeWeight() int {
+  if n.treeWeight > 0 { return n.treeWeight }
+
+  // if the sign allows this node to not exist, then its weight/alignment
+  // cost is always zero
+  if n.Sign == ZeroPlus || n.Sign == OnePlus {
+    n.treeWeight = 0
+    return 0
+  }
+
+  myWeight := 1 // the weight that this node counts for
+
+  // if this is a paren node then it itself doesn't count for any weight
+  if n.isParen {
+    myWeight = 0
+  }
+
+  // weight = this node's weight + all child weights
+  for _,c := range n.Children {
+    myWeight += c.TreeWeight()
+  }
+
+  // constant repeated elements have the equivalent constant-factor multiples
+  // on weight
+  if n.Sign > 1 {
+    myWeight *= n.Sign
+  }
+
+  return myWeight
 }
 
 func (n *Node) CallPreOrder(fn func(*Node)) {
@@ -262,7 +431,7 @@ func tagArrSimilar(tagArr1 []string, tagArr2 []string) bool {
     return false
   }
 
-  return float32(LevenshteinDistance(tagArr1,tagArr2))/(float32(len(tagArr1)+len(tagArr2))*0.5) <=
+  return float32(TagLevenshteinDistance(tagArr1,tagArr2))/(float32(len(tagArr1)+len(tagArr2))*0.5) <=
   EditDistThreshold
 }
 
@@ -356,8 +525,8 @@ func combComp(nodeList []*Node, k int) []*regionGroup {
   return retGroups
 }
 
-func getFirstEntry(filename string) *Entry {
-  f, err := os.Open("./lel.txt")
+func getSecondEntry(filename string) *Entry {
+  f, err := os.Open(filename)
   if err != nil {
     log.Fatal(err)
   }
@@ -385,7 +554,7 @@ func getFirstEntry(filename string) *Entry {
 func main() {
   //defer profile.Start(profile.CPUProfile).Stop()
 
-  entry := getFirstEntry("./lel.txt")
+  entry := getSecondEntry("./test.txt")
   templatizedNode := TemplatizeNode(&entry.Dom,10)
   fmt.Println(templatizedNode)
 }
