@@ -121,7 +121,7 @@ generateEntryFromTemplate = (template) ->
 
 
 
-template = generateTemplate(1)
+template = generateTemplate(3)
 
 console.log JSON.stringify(template)
 for i in [0...100]

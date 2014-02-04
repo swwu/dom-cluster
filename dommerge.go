@@ -1,6 +1,7 @@
 package main
 
 import (
+  "strings"
   "bytes"
   "io"
   "log"
@@ -86,8 +87,8 @@ func (na *NodeAlignment) MakeCopy() *NodeAlignment {
 func (na *NodeAlignment) InsOp(score int, newNode *Node) {
   na.score += score
   na.aligned = append(na.aligned, AlignmentInstance{
-    a: nil,
-    b: newNode,
+    a: newNode,
+    b: nil,
   })
 }
 
@@ -95,8 +96,8 @@ func (na *NodeAlignment) InsOp(score int, newNode *Node) {
 func (na *NodeAlignment) SubOp(score int, firstNode *Node, secondNode *Node) {
   na.score += score
   na.aligned = append(na.aligned, AlignmentInstance{
-    a: firstNode,
-    b: secondNode,
+    a: secondNode,
+    b: firstNode,
   })
 }
 
@@ -104,27 +105,130 @@ func (na *NodeAlignment) SubOp(score int, firstNode *Node, secondNode *Node) {
 func (na *NodeAlignment) DelOp(score int, delNode *Node) {
   na.score += score
   na.aligned = append(na.aligned, AlignmentInstance{
-    a: delNode,
-    b: nil,
+    a: nil,
+    b: delNode,
   })
 }
 
 func (na *NodeAlignment) PrintAlignment() {
-  for i:=0;i<len(aligned);i++ {
-    fmt.Printf("+")
-  }
-  fmt.Printf("\n")
-  // TODO: finish this
-  fmt.Printf("\n")
-  for i:=0;i<len(aligned);i++ {
-    fmt.Printf("-")
+  for _,alignment := range na.aligned {
+    var aName = "---"
+    var bName = "---"
+    if alignment.a != nil {
+      aName = alignment.a.String()
+    }
+    if alignment.b != nil {
+      bName = alignment.b.String()
+    }
+    fmt.Printf("%s <----> %s\n", aName,bName)
   }
 }
 
+
+func NodeMerge(a,b *Node) *Node {
+  newNode := DefaultNode()
+  var newSign int
+
+  // if they are both non-nil, then "merge" the nodes
+  if a != nil && b != nil {
+    if a.NodeName == b.NodeName {
+      newNode.NodeName = a.NodeName
+    } else {
+      newNode.NodeName = "##mismatch"
+    }
+    alignment := NodeArrAlign(a.Children, b.Children)
+    for _,instance := range alignment.aligned {
+      newNode.Children = append(newNode.Children, NodeMerge(instance.a,instance.b))
+    }
+
+    aSign := a.Sign
+    bSign := b.Sign
+
+    if aSign == 0 { aSign = 1 }
+    if bSign == 0 { bSign = 1 }
+    if aSign < bSign { // a is always larger (special char constants are all negative)
+      tmp := aSign
+      aSign = bSign
+      bSign = tmp
+    }
+
+    // handle signs
+    switch {
+    // 1,1 -> 1
+    // N,N -> N
+    // *,* -> *
+    // +,+ -> +
+    // ?,? -> ?
+    case aSign == bSign:
+      newSign = aSign
+
+    // 1,? -> ?
+    case aSign == 1 && bSign == ZeroOne:
+      newSign = ZeroOne
+
+    // N,? -> *
+    case aSign > 1 && bSign == ZeroOne,
+    // +,? -> *
+      aSign == OnePlus && bSign == ZeroOne,
+    // 1,* -> *
+    // N,* -> *
+      aSign >= 1 && bSign == ZeroPlus,
+    // *,? -> *
+      aSign == ZeroPlus && bSign == ZeroOne,
+    // +,* -> *
+      aSign == OnePlus && bSign == ZeroPlus:
+      newSign = ZeroPlus
+
+    // N,1|N,M -> +
+    case aSign > 1 && bSign >=1,
+    // N,+|1,+ -> +
+      aSign >= 1 && bSign == OnePlus:
+      newSign = OnePlus
+    default:
+      log.Fatal("ordering wrong somewhere")
+    }
+
+  // if only one is non-nil, then add that node with transformed sign
+  } else if a != nil || b != nil {
+    if a != nil {
+      newNode.NodeName = a.NodeName
+    } else if b != nil {
+      newNode.NodeName = b.NodeName
+    }
+
+    var sign int
+    var node *Node
+    if a == nil {
+      node = b
+      sign = b.Sign
+    } else {
+      node = a
+      sign = a.Sign
+    }
+    if sign == 0 { sign = 1 }
+
+    newNode.Children = node.Children
+
+    // handle signs
+    switch {
+    // 1|? -> ?
+    case sign == 1 || sign == ZeroOne:
+      newSign = ZeroOne
+    //+|*|N -> *
+    default:
+      newSign = ZeroPlus
+    }
+  }
+
+  newNode.Sign = newSign
+
+  return newNode
+}
+
 // align two forests
-// TODO: we can't use the matrix approach because ?+* prevents us from knowing
-// beforehand the dimensions of the matrix
-func NodeAlign(a,b []*Node) *NodeAlignment {
+// TODO: we can't ultimately use the matrix approach because ?+* prevents us
+// from knowing beforehand the dimensions of the matrix
+func NodeArrAlign(a,b []*Node) *NodeAlignment {
   la := len(a)
   lb := len(b)
 
@@ -158,33 +262,36 @@ func NodeAlign(a,b []*Node) *NodeAlignment {
       // properly inserted (a "deletion" still inserts the deleted element
       // with sign '?')
 
-      // TODO: make +?* properly consume multiple input values
-
       // horizontal movement (deletion)
       newVal := d[j].MakeCopy()
-      newVal.DelOp(b[j].TreeWeight(), b[j-1])
+      newVal.DelOp(b[i-1].TreeWeight(), b[i-1])
 
       // vertical movement (insertion)
-      vVal := d[j].MakeCopy()
-      vVal.InsOp(a[i].TreeWeight(), a[i-1])
+      vVal := d[j-1].MakeCopy()
+      vVal.InsOp(a[j-1].TreeWeight(), a[j-1])
       if vVal.score < newVal.score {
         newVal = vVal
       }
 
       // diagonal movement
-      var subCost := 0
-      if a[i-1].NodeName != b[j-1].NodeName {
-        subCost = a[i-1].TreeWeight() + b[j-1].TreeWeight()
+      subCost := 0
+      if a[j-1].NodeName != b[i-1].NodeName {
+        // make it more expensive than ins + del 
+        subCost = a[j-1].TreeWeight() + b[i-1].TreeWeight() + 1
       }
-      dVal := d[j].MakeCopy()
-      dVal.SubOp(subCost, a[i-1], b[j-1])
-      if dval < newval {
-        newval = dval
+      dVal := lastDiag.MakeCopy()
+      dVal.SubOp(subCost, a[j-1], b[i-1])
+      if dVal.score < newVal.score {
+        newVal = dVal
       }
+
+      d[j] = newVal
 
       lastDiag = lastVal // update the diagonal to be the element formerly to the left
     }
   }
+
+  return d[la]
 }
 
 // Levenshtein to compare tag arrays
@@ -319,6 +426,36 @@ func (n *Node) CallPreOrder(fn func(*Node)) {
   }
 }
 
+func (n *Node) SignStr() string {
+  switch {
+  case n.Sign >= 0:
+    return fmt.Sprintf("%d",n.Sign)
+  case n.Sign == OnePlus:
+    return "+"
+  case n.Sign == ZeroPlus:
+    return "*"
+  case n.Sign == ZeroOne:
+    return "?"
+  default:
+    return "_"
+  }
+}
+
+func (n *Node) String() string {
+  buf := bytes.NewBufferString(n.NodeName)
+
+  if id,exists := n.Attrs["id"]; exists {
+    buf.WriteString(fmt.Sprintf("#%s",id))
+  }
+  if classes,exists := n.Attrs["class"]; exists {
+    buf.WriteString(
+      fmt.Sprintf(".%s",strings.Join(strings.Split(classes, " "),".")))
+  }
+  buf.WriteString(fmt.Sprintf("^{%s}",n.SignStr()))
+
+  return buf.String()
+}
+
 type repeatGroup struct {
   RegionGroups []*regionGroup
 }
@@ -360,6 +497,8 @@ func TemplatizeNode(node *Node, k int) *Node {
 
       allGroups := combComp(node.Children, k)
 
+      //prelen := len(node.Children)
+
       // every node that's alraedy in a group
       groupedChildren := map[*Node]struct{}{}
       for _,group := range allGroups {
@@ -399,6 +538,13 @@ func TemplatizeNode(node *Node, k int) *Node {
       }
       //oldChildren := node.Children
       node.Children = newChildren
+      //postlen := len(node.Children)
+
+      //fmt.Println("==========")
+      //fmt.Println(listToTagArr(node.Children,10))
+      //if prelen != postlen {
+      //  fmt.Printf("%d to %d\n", prelen, postlen)
+      //}
 
     }
     for _,c := range node.Children {
@@ -525,7 +671,8 @@ func combComp(nodeList []*Node, k int) []*regionGroup {
   return retGroups
 }
 
-func getSecondEntry(filename string) *Entry {
+
+func getEntries(filename string) []*Entry {
   f, err := os.Open(filename)
   if err != nil {
     log.Fatal(err)
@@ -533,13 +680,15 @@ func getSecondEntry(filename string) *Entry {
   defer f.Close()
 
   r := bufio.NewReaderSize(f,512*1024)
+  r.ReadLine() // extra read since first one is template
   line, isPrefix, err := r.ReadLine()
-  var entry Entry
+  entries := []*Entry{}
   for err == nil && !isPrefix {
+    var entry Entry
     json.Unmarshal(line, &entry)
 
-    break // remove this if we want to read the whole file
-    //line, isPrefix, err = r.ReadLine()
+    entries = append(entries, &entry)
+    line, isPrefix, err = r.ReadLine()
   }
   if err != io.EOF && err != nil {
       log.Fatal(err)
@@ -548,13 +697,17 @@ func getSecondEntry(filename string) *Entry {
     log.Fatal("buffer size too small")
   }
 
-  return &entry
+  return entries
 }
 
 func main() {
   //defer profile.Start(profile.CPUProfile).Stop()
 
-  entry := getSecondEntry("./test.txt")
-  templatizedNode := TemplatizeNode(&entry.Dom,10)
-  fmt.Println(templatizedNode)
+  entries := getEntries("./test.txt")
+  //entry := entries[0]
+  //templatizedNode := TemplatizeNode(&entry.Dom,10)
+  //fmt.Println(templatizedNode)
+  a := TemplatizeNode(&entries[2].Dom,10)
+  b := TemplatizeNode(&entries[1].Dom,10)
+  fmt.Println(NodeMerge(a,b).Children)
 }
