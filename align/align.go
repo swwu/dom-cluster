@@ -20,12 +20,12 @@ func (i *AlignmentInstance) B() *dom.Node {
 }
 
 type NodeAlignment struct {
-  score int
+  score float64
   aligned []AlignmentInstance
 }
 
 // creates a "base" alignment (empty aligned array) with a given score
-func BaseNodeAlignment(score int) *NodeAlignment {
+func BaseNodeAlignment(score float64) *NodeAlignment {
   return &NodeAlignment {
     score: score,
   }
@@ -40,7 +40,7 @@ func (na *NodeAlignment) MakeCopy() *NodeAlignment {
   }
 }
 
-func (na *NodeAlignment) Score() int {
+func (na *NodeAlignment) Score() float64 {
   return na.score
 }
 
@@ -49,7 +49,7 @@ func (na *NodeAlignment) Aligned() []AlignmentInstance {
 }
 
 // insertion
-func (na *NodeAlignment) InsOp(score int, newNode *dom.Node) {
+func (na *NodeAlignment) InsOp(score float64, newNode *dom.Node) {
   na.score += score
   na.aligned = append(na.aligned, AlignmentInstance{
     a: newNode,
@@ -58,7 +58,7 @@ func (na *NodeAlignment) InsOp(score int, newNode *dom.Node) {
 }
 
 // substitution
-func (na *NodeAlignment) SubOp(score int, firstNode *dom.Node, secondNode *dom.Node) {
+func (na *NodeAlignment) SubOp(score float64, firstNode *dom.Node, secondNode *dom.Node) {
   na.score += score
   na.aligned = append(na.aligned, AlignmentInstance{
     a: secondNode,
@@ -67,7 +67,7 @@ func (na *NodeAlignment) SubOp(score int, firstNode *dom.Node, secondNode *dom.N
 }
 
 // deletion
-func (na *NodeAlignment) DelOp(score int, delNode *dom.Node) {
+func (na *NodeAlignment) DelOp(score float64, delNode *dom.Node) {
   na.score += score
   na.aligned = append(na.aligned, AlignmentInstance{
     a: nil,
@@ -104,7 +104,7 @@ func NodeArrAlign(a,b []*dom.Node) *NodeAlignment {
   d[0] = BaseNodeAlignment(0)
   for i := 1; i <= la; i++ {
     d[i] = d[i-1].MakeCopy()
-    d[i].InsOp(a[i-1].TreeWeight(), a[i-1])
+    d[i].InsOp(float64(a[i-1].TreeWeight()), a[i-1])
   }
 
   // iteration of i corresponds to "moving" the column represented by d,
@@ -114,7 +114,7 @@ func NodeArrAlign(a,b []*dom.Node) *NodeAlignment {
     // the 0th element of each column is just the total "cost" of b so far
     lastDiag := d[0] // keep track of the diagonal to substitute from
     d[0] = d[0].MakeCopy()
-    d[0].InsOp(b[i-1].TreeWeight(), b[i-1])
+    d[0].InsOp(float64(b[i-1].TreeWeight()), b[i-1])
 
     // we now iterate over the column
     for j := 1; j <= la; j++ {
@@ -130,20 +130,20 @@ func NodeArrAlign(a,b []*dom.Node) *NodeAlignment {
 
       // horizontal movement (deletion)
       newVal := d[j].MakeCopy()
-      newVal.DelOp(b[i-1].TreeWeight(), b[i-1])
+      newVal.DelOp(float64(b[i-1].TreeWeight()), b[i-1])
 
       // vertical movement (insertion)
       vVal := d[j-1].MakeCopy()
-      vVal.InsOp(a[j-1].TreeWeight(), a[j-1])
+      vVal.InsOp(float64(a[j-1].TreeWeight()), a[j-1])
       if vVal.score < newVal.score {
         newVal = vVal
       }
 
       // diagonal movement
-      subCost := 0
+      subCost := 0.0
       if a[j-1].NodeName != b[i-1].NodeName {
         // make it more expensive than ins + del 
-        subCost = a[j-1].TreeWeight() + b[i-1].TreeWeight() + 1
+        subCost = float64(a[j-1].TreeWeight() + b[i-1].TreeWeight() + 1)
       }
       dVal := lastDiag.MakeCopy()
       dVal.SubOp(subCost, a[j-1], b[i-1])

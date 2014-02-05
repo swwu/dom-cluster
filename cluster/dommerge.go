@@ -44,16 +44,16 @@ func NodeMerge(a,b *dom.Node) (*dom.Node,float64) {
   retNode, score := NodeMergeRecurse(a,b)
 
   // norm = score / ((total1 + total2)/2)
-  normScore := 2*float64(score) / float64(a.TreeWeight() + b.TreeWeight())
+  normScore := 2*score / float64(a.TreeWeight() + b.TreeWeight())
 
   return retNode, normScore
 }
 
 
 // the inner recursive function that does the work for NodeMerge
-func NodeMergeRecurse(a,b *dom.Node) (*dom.Node,int) {
+func NodeMergeRecurse(a,b *dom.Node) (*dom.Node,float64) {
   newNode := dom.DefaultNode()
-  alignScore := 0
+  alignScore := 0.0
   var newSign int
 
   // if they are both non-nil, then "merge" the nodes
@@ -61,7 +61,19 @@ func NodeMergeRecurse(a,b *dom.Node) (*dom.Node,int) {
     if a.NodeName == b.NodeName { // equal nodenames, we align
       newNode.NodeName = a.NodeName
 
+      if a.Attrs["id"] != b.Attrs["id"] {
+        alignScore += 0.75
+      }
+      if a.Attrs["class"] != b.Attrs["class"] {
+        alignScore += 0.5
+      }
+
       alignment := align.NodeArrAlign(a.Children, b.Children)
+      /*
+      fmt.Println("==============")
+      alignment.PrintAlignment()
+      fmt.Printf("==== Score %f\n", alignment.Score())
+      */
       alignScore += alignment.Score()
       for _,instance := range alignment.Aligned() {
         merged, mergeScore := NodeMergeRecurse(instance.A(),instance.B())
@@ -118,7 +130,7 @@ func NodeMergeRecurse(a,b *dom.Node) (*dom.Node,int) {
       }
     } else { // if we have a mismatch then score it as such
       newNode.NodeName = "##mismatch"
-      alignScore += a.TreeWeight() + b.TreeWeight()
+      alignScore += float64(a.TreeWeight() + b.TreeWeight())
     }
 
   // if only one is non-nil, then add that node with transformed sign
