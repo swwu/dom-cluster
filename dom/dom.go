@@ -17,8 +17,8 @@ const (
 
 
 type Entry struct {
-  Url string `json:"url"`
-  Dom Node `json:"dom"`
+  Uri string `json:"url"`
+  Dom *Node `json:"dom"`
 }
 
 type Node struct {

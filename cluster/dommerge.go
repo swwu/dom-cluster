@@ -239,7 +239,7 @@ Specifically, detects nodes and node groups (adjacent sibling nodes) with
 similar or identical structure, and represents them as a single signed node
 or signed parenthetical node whenever possible
 */
-func TemplatizeNode(node *dom.Node, k int) *dom.Node {
+func NodeToWrapper(node *dom.Node, k int) *dom.Node {
   // since we operate on the node's children to find repeating sibling groups,
   // depths of 1 or 2 are extremely unlike
   if node.TreeDepth() >= 3 {
@@ -301,7 +301,7 @@ func TemplatizeNode(node *dom.Node, k int) *dom.Node {
 
     }
     for _,c := range node.Children {
-      TemplatizeNode(c, k)
+      NodeToWrapper(c, k)
     }
   }
 
